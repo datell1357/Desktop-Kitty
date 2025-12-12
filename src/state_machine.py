@@ -9,6 +9,7 @@ class StateMachine:
         self.frame_index = 0
         self.locked = False
         self.current_state = None # Helper for first set_state call
+        self.target_duration = 0
         
         # Initialize state properly
         self.set_state("idle", force=True)
@@ -25,20 +26,19 @@ class StateMachine:
             # Reset random duration for the new state
             self.target_duration = random.randint(1000, 5000) 
             
-            # Override duration for user-forced Sit/Sleep
-            if force and new_state in ["sit", "sleep"]:
+            # Override duration for specific states
+            if new_state == "sleep":
+                self.target_duration = random.randint(5000, 15000)
+            elif new_state == "feed":
+                self.target_duration = 5000 # 5.0 seconds fixed (0-1-0-1-0)
+            elif new_state == "toilet":
+                self.target_duration = 4500 # 4.5 seconds fixed
+            elif force and new_state == "sit":
                 self.target_duration = random.randint(5000, 10000)
-
-            # Print debug info (optional)
-            # print(f"State changed to: {self.current_state}")
 
     def update(self, dt_ms):
         """Updates state timers and logic."""
         self.state_timer += dt_ms
-        
-        # Advance animation frame
-        # We can decouple animation speed from logic speed if needed, 
-        # but for now we increment frame every tick that exceeds animation interval
         
         # Logic for auto-transitions
         if not self.locked:
@@ -46,20 +46,35 @@ class StateMachine:
 
     def step_animation(self):
         """Increments the animation frame index."""
-        self.frame_index += 1
+        # Special case: 'feed' runs at 1 frame per second
+        if self.current_state == "feed":
+            # 0, 1, 0, 1, 0 -> Indices 0, 1, 2, 3, 4
+            # Clamp to 4 so it ends on 0.png (5th frame)
+            idx = int(self.state_timer / 1000)
+            self.frame_index = min(4, idx)
+            
+        # Special case: 'toilet' runs at 1 frame per second
+        elif self.current_state == "toilet":
+            # Show frames 0, 1, 2, 3. 
+            # We want to ensure it ends on 3.
+            # 1 frame per second.
+            idx = int(self.state_timer / 1000)
+            self.frame_index = min(3, idx) 
+            
+        else:
+            self.frame_index += 1
 
     def decide_next_state(self):
         """Randomly decides to switch states based on timer."""
         
         # Check Wait Mode
         if self.owner.config.get("wait_mode"):
-            # If in wait mode, stay in current state (usually forced to Sit)
             return
 
         # Special case: Sleep lasts longer or user defined
         if self.current_state == "sleep":
-            if self.state_timer > self.target_duration: # Use target_duration
-                if random.random() < 0.05: # Small chance to wake up per tick after duration
+            if self.state_timer > self.target_duration: 
+                if random.random() < 0.05: 
                     self.set_state("idle")
             return
 
@@ -68,21 +83,26 @@ class StateMachine:
             if self.current_state == "walk":
                 self.set_state("idle")
             elif self.current_state == "idle":
-                # Random choice: Walk, Sit, Sleep, Jump
-                # Random choice: Walk (4x), Sit, Idle, Sleep, Jump (0.5x)
+                # Random choice
                 states = ["walk", "sit", "idle", "sleep", "jump"]
                 weights = [4.0, 1.0, 1.0, 1.0, 0.5]
                 choice = random.choices(states, weights=weights, k=1)[0]
                 self.set_state(choice)
                 
-                # User Request: Walk duration 1x ~ 4x
                 if choice == "walk":
                     mult = random.uniform(1.0, 4.0)
                     self.target_duration = int(self.target_duration * mult)
+                elif choice == "sleep":
+                    self.target_duration = random.randint(5000, 15000)
+
             elif self.current_state == "sit":
                 self.set_state("idle")
-            elif self.current_state == "jump": # Explicitly handle jump timeout
+            elif self.current_state == "jump": 
                 self.set_state("idle")
-            
+            elif self.current_state == "feed":
+                 self.set_state("idle")
+            elif self.current_state == "toilet":
+                 self.set_state("idle")
+
             # Reset timer
             self.state_timer = 0

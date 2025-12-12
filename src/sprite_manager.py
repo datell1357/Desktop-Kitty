@@ -15,12 +15,14 @@ class SpriteManager:
             "drag": [],
             "jump": [],
             "walk": [],
+            "feed": [],
+            "toilet": [],
         }
         self.load_sprites()
 
     def load_sprites(self):
         """Loads images from disk or creates placeholders."""
-        from PIL import Image, ImageOps
+        from PIL import Image, ImageOps, ImageDraw
         import numpy as np
         
         print(f"DEBUG: Looking for sprites in {SPRITES_DIR}")
@@ -35,53 +37,56 @@ class SpriteManager:
                         pil_img = Image.open(full_path).convert("RGBA")
                         
                         # 1. Smart Background Removal (Flood Fill)
-                        # Instead of removing ALL white pixels (which eats paws),
-                        # we only remove white pixels connected to the background (corner).
-                        
+                        # Apply to all states to ensure transparency
                         from PIL import ImageDraw
                         
-                        # Ensure RGBA
-                        pil_img = pil_img.convert("RGBA")
-                        
                         # Flood fill from (0,0) with transparency
-                        # Tolerance helps with collecting compression artifacts
-                        # Note: Pillow's floodfill might not support tolerance well in all versions,
-                        # but we can try targeting the color at (0,0).
-                        
-                        # Simplified approach:
-                        # 1. Get background color from top-left pixel
                         bg_color = pil_img.getpixel((0, 0))
                         
-                        # 2. Use ImageDraw to floodfill with transparent (0,0,0,0)
-                        # Threshold handles slight off-whites
-                        # Increased threshold to 60 to remove halos
+                        # Dynamic threshold: Aggressive (60) for sprites
                         thresh_val = 60
-                        ImageDraw.floodfill(pil_img, (0, 0), (0, 0, 0, 0), thresh=thresh_val)
                         
-                        # Also try other corners if needed, but (0,0) usually covers unconnected background
-                        w, h = pil_img.size
-                        ImageDraw.floodfill(pil_img, (w-1, 0), (0, 0, 0, 0), thresh=thresh_val)
-                        ImageDraw.floodfill(pil_img, (0, h-1), (0, 0, 0, 0), thresh=thresh_val)
-                        ImageDraw.floodfill(pil_img, (w-1, h-1), (0, 0, 0, 0), thresh=thresh_val)
+                        try:
+                            # Always floodfill from top-left
+                            ImageDraw.floodfill(pil_img, (0, 0), (0, 0, 0, 0), thresh=thresh_val)
+                            
+                            w, h = pil_img.size
+                            # Define corners to floodfill
+                            corners = [(w-1, 0), (0, h-1), (w-1, h-1)]
+                            
+                            # Add top-center ONLY if NOT dragging (to protect the hand)
+                            # The hand is usually at top-center for drag sprites.
+                            if state != "drag":
+                                corners.append((w//2, 0))
+                                
+                            for corner in corners:
+                                ImageDraw.floodfill(pil_img, corner, (0, 0, 0, 0), thresh=thresh_val)
+                            
+                        except Exception as e:
+                            print(f"DEBUG: Floodfill warning for {f}: {e}")
 
                         # 2. Resize
                         scale_factor = 1.0
-                        # walk: Reverted to 1.0 as per user request
                         if state in ["sleep", "drag"]:
                             scale_factor = 0.8
+                        elif state == "uncomfortable":
+                            scale_factor = 0.5 
                             
-                        if scale_factor != 1.0:
+                        if state == "uncomfortable":
+                             # Just resize, no padding
+                            w, h = pil_img.size
+                            target_w = int(w * scale_factor)
+                            target_h = int(h * scale_factor)
+                            pil_img = pil_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                        elif scale_factor != 1.0:
                             target_w = int(DEFAULT_SIZE[0] * scale_factor)
                             target_h = int(DEFAULT_SIZE[1] * scale_factor)
                             
-                            # Resize the content
                             pil_img = pil_img.resize((target_w, target_h), Image.Resampling.LANCZOS)
                             
-                            # Paste into a transparent frame of DEFAULT_SIZE to maintain alignment
                             base_img = Image.new("RGBA", DEFAULT_SIZE, (0, 0, 0, 0))
                             
                             x_offset = (DEFAULT_SIZE[0] - target_w) // 2
-                            # Align Center: (Frame Height - Image Height) // 2
                             y_offset = (DEFAULT_SIZE[1] - target_h) // 2
                             
                             base_img.paste(pil_img, (x_offset, y_offset))
@@ -119,18 +124,27 @@ class SpriteManager:
             color = color.darker(150)
         elif state_name == "drag":
             color = color.lighter(150)
+        elif state_name == "uncomfortable":
+             color = QColor("green")
             
         painter.setBrush(QBrush(color))
         painter.setPen(Qt.PenStyle.NoPen)
         
-        # Draw a simple cat shape (ellipse body + circle head)
-        painter.drawEllipse(20, 40, 80, 50) # Body
-        painter.drawEllipse(80, 10, 40, 40) # Head
+        Painter_funcs = {
+            "uncomfortable": lambda: painter.drawEllipse(44, 44, 40, 40)
+        }
         
-        # Eyes
-        painter.setBrush(Qt.GlobalColor.white)
-        painter.drawEllipse(90, 20, 8, 8)
-        painter.drawEllipse(105, 20, 8, 8)
+        if state_name in Painter_funcs:
+            Painter_funcs[state_name]()
+        else:
+            # Draw a simple cat shape (ellipse body + circle head)
+            painter.drawEllipse(20, 40, 80, 50) # Body
+            painter.drawEllipse(80, 10, 40, 40) # Head
+            
+            # Eyes
+            painter.setBrush(Qt.GlobalColor.white)
+            painter.drawEllipse(90, 20, 8, 8)
+            painter.drawEllipse(105, 20, 8, 8)
         
         # Text
         painter.setPen(Qt.GlobalColor.white)

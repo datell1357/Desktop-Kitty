@@ -8,6 +8,8 @@ from .constants import *
 from .sprite_manager import SpriteManager
 from .state_machine import StateMachine
 from .config import ConfigManager
+from .pet_status import PetStatus
+from .status_window import StatusWindow
 
 class PetEntity(QMainWindow):
     """The main transparent window entity for the desktop pet."""
@@ -19,6 +21,8 @@ class PetEntity(QMainWindow):
         self.config = ConfigManager()
         self.sprites = SpriteManager()
         self.fsm = StateMachine(self)
+        self.status = PetStatus()
+        self.status_window = None
         
         # Physics State
         self.velocity = QPointF(0, 0) # x, y velocity (Float for smooth gravity)
@@ -100,9 +104,40 @@ class PetEntity(QMainWindow):
         
         self.context_menu.addSeparator()
         
+        self.action_feed = QAction("Feed (+40 Hunger)", self)
+        self.action_feed.triggered.connect(self.start_feed_sequence)
+        self.context_menu.addAction(self.action_feed)
+        
+        self.action_toilet = QAction("Go to Toilet", self)
+        self.action_toilet.triggered.connect(self.start_toilet_sequence)
+        self.action_toilet.setEnabled(False) # Default disabled
+        self.context_menu.addAction(self.action_toilet)
+        
+        self.context_menu.addSeparator()
+        
         action_exit = QAction("Exit", self)
         action_exit.triggered.connect(self.close_app)
         self.context_menu.addAction(action_exit)
+        
+        # --- Debug Menu ---
+        self.context_menu.addSeparator()
+        debug_menu = self.context_menu.addMenu("Debug Tools")
+        
+        action_full_hunger = QAction("Full Hunger (100)", self)
+        action_full_hunger.triggered.connect(lambda: self.status.debug_set_full_hunger() if self.status else None)
+        debug_menu.addAction(action_full_hunger)
+        
+        action_hunger_30 = QAction("Set Hunger 30", self)
+        action_hunger_30.triggered.connect(lambda: self.status.debug_set_hunger_30() if self.status else None)
+        debug_menu.addAction(action_hunger_30)
+        
+        action_reset_cooldown = QAction("Reset Feed Cooldown", self)
+        action_reset_cooldown.triggered.connect(lambda: self.status.debug_reset_feed_cooldown() if self.status else None)
+        debug_menu.addAction(action_reset_cooldown)
+        
+        action_force_uncomfy = QAction("Force Uncomfortable", self)
+        action_force_uncomfy.triggered.connect(self.debug_trigger_uncomfortable)
+        debug_menu.addAction(action_force_uncomfy)
 
     def trigger_user_jump(self):
         # User defined jump: Random direction
@@ -112,28 +147,45 @@ class PetEntity(QMainWindow):
     def paintEvent(self, event):
         painter = QPainter(self)
         
-        # Determine Sprite Key
+        # 1. Draw Pet
         state = self.fsm.current_state
         sprite_key = state
         
         if state == "walk" or state == "follow":
             sprite_key = "walk"
-        elif state == "run": # If we add run later
-            sprite_key = "run_left" if self.direction == -1 else "run_right"
+        elif state == "run":
+            sprite_key = "walk"
             
+        # Determine Frame Index logic
+        frame_idx = self.fsm.frame_index
+        
+        # Mood-based static branch for idle/sit
+        if state in ["idle", "sit"] and self.status:
+            mood = self.status.get_mood()
+            # Mood logic:
+            # - Happy (Default): index 0
+            # - Uncomfortable OR Bad: index 1 (bad.png) if available
+            
+            if mood == "행복":
+                frame_idx = 0
+            else:
+                # Uncomfortable or Bad uses bad.png
+                if self.sprites.get_frame_count(state) > 1:
+                    frame_idx = 1
+                else:
+                    frame_idx = 0
+        
         # Get current frame
-        frame = self.sprites.get_frame(sprite_key, self.fsm.frame_index)
+        frame = self.sprites.get_frame(sprite_key, frame_idx)
         
         if frame:
             # Flip Logic
             need_flip = False
             
-            if state in ["walk", "follow", "idle", "sit"]:
-                 # Left-Facing Base: Flip if Right (1)
+            if state in ["walk", "follow", "idle", "sit", "feed", "toilet"]:
                  if self.direction == 1:
                      need_flip = True
             elif state in ["drag", "jump", "sleep"]:
-                 # Right-Facing Base: Flip if Left (-1)
                  if self.direction == -1:
                      need_flip = True
             
@@ -142,8 +194,12 @@ class PetEntity(QMainWindow):
                  frame = frame.transformed(QTransform().scale(-1, 1))
                 
             painter.drawPixmap(0, 0, frame)
-            
+
     def mousePressEvent(self, event):
+        # BLOCK INTERACTION if performing blocking actions
+        if self.fsm.current_state in ["feed", "toilet"]:
+            return
+
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_dragging = True
             self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -151,27 +207,34 @@ class PetEntity(QMainWindow):
             self.fsm.locked = True
             event.accept()
         elif event.button() == Qt.MouseButton.RightButton:
+            # Update Actions
+            if self.status:
+                # Feed
+                self.action_feed.setEnabled(self.status.can_feed())
+                if not self.status.can_feed():
+                    self.action_feed.setText("Feed (Cooldown...)")
+                else:
+                    self.action_feed.setText("Feed (+40 Hunger)")
+                
+                # Toilet
+                self.action_toilet.setEnabled(self.status.is_uncomfortable)
+                
             self.context_menu.exec(event.globalPosition().toPoint())
             event.accept()
 
     def is_valid_location(self, x, y):
         """Checks if the pet's window rect at (x, y) is fully within valid screen space."""
-        # To prevent "head going into edge", we ensure ALL corners are in valid screens.
-        # This allows straddling between monitors (e.g. Left corners in Monitor 1, Right in Monitor 2)
-        # but prevents any part from being in the void.
-        
         w, h = self.width(), self.height()
         points = [
-            QPoint(int(x), int(y)),                  # Top-Left
-            QPoint(int(x + w), int(y)),              # Top-Right
-            QPoint(int(x), int(y + h)),              # Bottom-Left
-            QPoint(int(x + w), int(y + h))           # Bottom-Right
+            QPoint(int(x), int(y)),
+            QPoint(int(x + w), int(y)),
+            QPoint(int(x), int(y + h)),
+            QPoint(int(x + w), int(y + h))
         ]
         
         screens = QApplication.screens()
         
         for p in points:
-            # Check if this point is in ANY screen
             point_valid = False
             for screen in screens:
                 if screen.availableGeometry().contains(p):
@@ -186,23 +249,13 @@ class PetEntity(QMainWindow):
     def mouseMoveEvent(self, event):
         if self.is_dragging and event.buttons() & Qt.MouseButton.LeftButton:
             new_pos = event.globalPosition().toPoint() - self.drag_position
-            
-            # Helper: Determine drag direction
             dx = new_pos.x() - self.pos().x()
-            if abs(dx) > 2: # Threshold to prevent jitter
+            if abs(dx) > 2: 
                 self.direction = 1 if dx > 0 else -1
-            
-            # Multi-monitor bounds check:
-            # Only allow move if it stays somewhat within valid screen area.
-            # However, for drag, strict checking feels bad if you briefly clip the edge.
-            # But user asked to STOP at edge. 
-            # So we check if the new position is valid. If not, we don't move (effectively clamping to valid area).
             
             if self.is_valid_location(new_pos.x(), new_pos.y()):
                 self.move(new_pos)
             else:
-                 # Optional: Try to clamp to nearest valid screen edge? 
-                 # For now, just refusing to move into void is simple and effective.
                  pass
                  
             event.accept()
@@ -211,8 +264,6 @@ class PetEntity(QMainWindow):
         if event.button() == Qt.MouseButton.LeftButton:
             self.is_dragging = False
             self.fsm.locked = False
-            # Only revert to Idle if we were dragging.
-            # If a Double Click triggered a Jump/Sit/Sleep, do NOT overwrite it with Idle.
             if self.fsm.current_state == "drag":
                 self.fsm.set_state("idle", force=True)
             self.save_position()
@@ -220,19 +271,30 @@ class PetEntity(QMainWindow):
 
     def mouseDoubleClickEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            # Random reaction
-            reactions = ["sit", "jump", "sleep"]
-            choice = random.choice(reactions)
+            if self.status_window is None:
+                self.status_window = StatusWindow(self.status)
             
-            if choice == "jump":
-                self.trigger_user_jump()
-            else:
-                self.fsm.set_state(choice, force=True)
+            pet_pos = self.pos()
+            status_x = pet_pos.x() + self.width() + 10
+            status_y = pet_pos.y() - 50
+            
+            self.status_window.move(status_x, status_y)
+            self.status_window.show()
+            self.status_window.raise_()
+            self.status_window.activateWindow()
+            
             event.accept()
 
     def update_animation(self):
         self.fsm.step_animation()
         self.update() # Trigger repaint
+        
+        # Check mood lazy update occasionally? 
+        # Actually paintEvent calls get_mood indirectly via icon check? 
+        # No, init checked it.
+        # Let's explicitly trigger mood update for logic (e.g. uncomfortable transition)
+        if self.status:
+            self.status.update_mood_status()
 
     def update_physics(self):
         if self.is_dragging:
@@ -245,7 +307,6 @@ class PetEntity(QMainWindow):
         current_pos = self.pos()
         
         if self.fsm.current_state == "walk":
-            # Initialize random walk direction at start of state
             if self.fsm.state_timer <= PHYSICS_INTERVAL_MS * 2:
                 import math
                 import random
@@ -253,11 +314,9 @@ class PetEntity(QMainWindow):
                 speed = MOVE_SPEED
                 self.velocity = QPointF(math.cos(angle) * speed, math.sin(angle) * speed)
                 
-                # Set visual facing based on X
                 if self.velocity.x() != 0:
                     self.direction = 1 if self.velocity.x() > 0 else -1
 
-            # Move
             current_pos = self.pos()
             new_x = current_pos.x() + self.velocity.x()
             new_y = current_pos.y() + self.velocity.y()
@@ -265,49 +324,37 @@ class PetEntity(QMainWindow):
             if not self.is_valid_location(new_x, current_pos.y()):
                  self.velocity.setX(-self.velocity.x())
                  self.direction = 1 if self.velocity.x() > 0 else -1
-                 new_x = current_pos.x() # Cancel move
+                 new_x = current_pos.x() 
                  
             if not self.is_valid_location(new_x, new_y):
                  self.velocity.setY(-self.velocity.y())
-                 new_y = current_pos.y() # Cancel move
+                 new_y = current_pos.y() 
 
             self.move(int(new_x), int(new_y))
             
         elif self.fsm.current_state == "jump":
-            # 45 Degree Jump Physics
             dt = PHYSICS_INTERVAL_MS / 1000.0
             
-            # Initialize Jump Velocity (Front-Up 45 deg) & Capture Floor
             if self.fsm.state_timer <= PHYSICS_INTERVAL_MS * 2:
-                # 45 deg = equal x and y components
-                # Jump Power
-                POWER = 400 # px/s ( Increased for 1.7x height)
-                # X direction depends on facing
-                vx = POWER * self.direction * 0.707 # cos(45)
-                vy = -POWER * 0.707 # sin(45) - moving Up is negative Y
+                POWER = 400 
+                vx = POWER * self.direction * 0.707 
+                vy = -POWER * 0.707 
                 self.velocity = QPointF(vx, vy)
                 self.jump_start_y = float(self.pos().y())
             elif not hasattr(self, 'jump_start_y'):
-                # Safety fallback if jump started mid-logic or somehow missed
                 self.jump_start_y = float(self.pos().y())
             
-            # Gravity
-            GRAVITY = 800 # px/s^2
+            GRAVITY = 800 
             self.velocity.setY(self.velocity.y() + GRAVITY * dt)
             
-            # Move
             next_x = current_pos.x() + self.velocity.x() * dt
             next_y = current_pos.y() + self.velocity.y() * dt
             
-            # Wall Bounce (Check if next X is valid)
             if not self.is_valid_location(next_x, current_pos.y()):
                 self.velocity.setX(-self.velocity.x())
-                next_x = current_pos.x() # Cancel X move
+                next_x = current_pos.x() 
                 self.direction *= -1
 
-            # Landing Check (Floor = start_y)
-            # We assume floor is always valid if start_y was valid? 
-            # Simpler check: If falling and below start Y, land.
             if self.velocity.y() > 0 and next_y >= self.jump_start_y:
                  next_y = self.jump_start_y
                  self.velocity = QPointF(0, 0)
@@ -319,7 +366,6 @@ class PetEntity(QMainWindow):
         elif self.fsm.current_state == "follow":
             import math
             target = QCursor.pos()
-            # Calculate center of pet
             cx = current_pos.x() + self.width() // 2
             cy = current_pos.y() + self.height() // 2
             
@@ -327,39 +373,29 @@ class PetEntity(QMainWindow):
             dy = target.y() - cy
             dist = math.hypot(dx, dy)
             
-            # 1. Direction Facing (Visual Only)
             if abs(dx) > 5:
                 self.direction = 1 if dx > 0 else -1
             
-            # 2. Movement
-            dist_threshold = 20 # Stop slightly before cursor
+            dist_threshold = 20 
             
             if dist > dist_threshold:
-                # Normalize and scale by speed
-                speed = 2.5 # Slower follow speed
+                speed = 2.5 
                 vx = (dx / dist) * speed
                 vy = (dy / dist) * speed
                 
-                # Move
                 next_x = current_pos.x() + vx
                 next_y = current_pos.y() + vy
                 
-                # Validity Check
                 if self.is_valid_location(next_x, next_y):
                     self.move(int(next_x), int(next_y))
                 else:
-                    # Try to move as close as possible? 
-                    # For now just stop at edge.
                     pass
             else:
-                 # Arrived: Sit down
                  self.direction *= -1
                  self.fsm.set_state("sit")
 
         else:
-            # Check for Persistent Follow Mode
             if self.config.get("follow_mode", False) and not self.is_dragging:
-                 # If in Idle/Sit/Walk/Sleep, check distance
                  target = QCursor.pos()
                  cx = current_pos.x() + self.width() // 2
                  cy = current_pos.y() + self.height() // 2
@@ -368,7 +404,6 @@ class PetEntity(QMainWindow):
                  dy = target.y() - cy
                  dist = (dx**2 + dy**2)**0.5
                  
-                 # Trigger follow if mouse moves away (threshold)
                  if dist > 60: 
                      self.fsm.set_state("follow")
 
@@ -385,7 +420,6 @@ class PetEntity(QMainWindow):
         self.action_wait.setChecked(new_val)
         
         if new_val:
-            # When enabling Wait, force Sit immediately
             self.fsm.set_state("sit", force=True)
 
     def toggle_floating(self):
@@ -398,5 +432,46 @@ class PetEntity(QMainWindow):
         self.config.set("last_y", self.pos().y())
 
     def close_app(self):
+        self.close()
+
+    def closeEvent(self, event):
         self.save_position()
-        QApplication.quit()
+        
+        if self.status_window:
+            self.status_window.close()
+
+        if self.status:
+            try:
+                self.status.save_data()
+            except Exception as e:
+                print(f"Error saving PetStatus: {e}")
+        event.accept()
+
+    def start_feed_sequence(self):
+        if not self.status or not self.status.can_feed():
+            return
+            
+        self.fsm.set_state("feed", force=True)
+        QTimer.singleShot(5000, self.finish_feed)
+        
+    def finish_feed(self):
+        if self.status:
+            self.status.feed(40)
+            self.status.record_feed()
+
+    def start_toilet_sequence(self):
+        if not self.status or not self.status.is_uncomfortable:
+            return
+        
+        self.fsm.set_state("toilet", force=True)
+        QTimer.singleShot(4500, self.finish_toilet)
+        
+    def finish_toilet(self):
+        if self.status:
+            self.status.poop()
+            self.update() # Trigger repaint to remove icon
+
+    def debug_trigger_uncomfortable(self):
+        if self.status:
+            self.status.debug_set_uncomfortable()
+            self.update() # Repaint for icon
