@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QFrame
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton, QFrame, QInputDialog, QMessageBox, QLineEdit
 from PyQt6.QtCore import Qt, QTimer, QPoint
 from PyQt6.QtGui import QColor, QCursor
 
@@ -6,11 +6,12 @@ class StatusWindow(QWidget):
     def __init__(self, pet_status, parent=None):
         super().__init__(parent)
         self.pet_status = pet_status
+        self.pet_entity = parent
         
         # Window Setup
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(220, 200)
+        self.setFixedSize(220, 230) # Increased height for button
 
         # Drag variables
         self.drag_pos = None
@@ -118,6 +119,28 @@ class StatusWindow(QWidget):
         content_layout.addWidget(self.bar_hunger)
         
         content_layout.addStretch()
+
+        # Debug Button (Bottom Right)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        self.btn_debug = QPushButton("Debug")
+        self.btn_debug.setFixedSize(60, 25)
+        self.btn_debug.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        self.btn_debug.setStyleSheet("""
+            QPushButton {
+                background-color: #DDDDDD;
+                color: #555;
+                font-size: 11px;
+                border-radius: 5px;
+                border: 1px solid #CCC;
+            }
+            QPushButton:hover {
+                background-color: #CCCCCC;
+            }
+        """)
+        self.btn_debug.clicked.connect(self.show_debug_login)
+        btn_layout.addWidget(self.btn_debug)
+        content_layout.addLayout(btn_layout)
         
         container_layout.addWidget(content_widget)
         
@@ -127,6 +150,17 @@ class StatusWindow(QWidget):
         self.timer.start(1000)
         
         self.update_ui()
+    
+    def show_debug_login(self):
+        text, ok = QInputDialog.getText(self, "Developer Mode", "Password:", QLineEdit.EchoMode.Password)
+        if ok and text == "Kitty":
+            if self.pet_entity:
+                self.pet_entity.enable_developer_mode()
+                QMessageBox.information(self, "Success", "Developer Mode Enabled!")
+            else:
+                 QMessageBox.warning(self, "Error", "Pet Entity reference is missing.")
+        elif ok:
+             QMessageBox.warning(self, "Error", "Incorrect Password.")
 
     def update_ui(self):
         # Update Labels

@@ -25,6 +25,8 @@ class PetStatus(QObject):
         self.last_fed_time = 0 # Timestamp of last feed
         self.digest_finish_time = 0 # Timestamp when uncomfortable starts (0 = none)
         self.is_uncomfortable = False
+        self.is_bored = False
+        self.start_bored_timer()
         
         self.load_data()
         
@@ -32,6 +34,12 @@ class PetStatus(QObject):
         self.hunger_timer = QTimer(self)
         self.hunger_timer.timeout.connect(self.decay_hunger)
         self.hunger_timer.start(60 * 1000) # 60 seconds
+
+    def start_bored_timer(self):
+        # Check for boredom every 30 minutes
+        self.bored_check_timer = QTimer(self)
+        self.bored_check_timer.timeout.connect(self.update_bored_status)
+        self.bored_check_timer.start(30 * 60 * 1000) # 30 minutes
 
     def load_data(self):
         if os.path.exists(self.data_file):
@@ -43,7 +51,8 @@ class PetStatus(QObject):
                     self.last_fed_time = data.get("last_fed_time", 0)
                     self.digest_finish_time = data.get("digest_finish_time", 0)
                     self.is_uncomfortable = data.get("is_uncomfortable", False)
-                    print(f"DEBUG: Loaded data - Hunger: {self.hunger}, Uncomfortable: {self.is_uncomfortable}")
+                    self.is_bored = data.get("is_bored", False)
+                    print(f"DEBUG: Loaded data - Hunger: {self.hunger}, Uncomfortable: {self.is_uncomfortable}, Bored: {self.is_bored}")
             except Exception as e:
                 print(f"Error loading data: {e}")
                 # Keep defaults
@@ -59,7 +68,8 @@ class PetStatus(QObject):
             "hunger": self.hunger,
             "last_fed_time": self.last_fed_time,
             "digest_finish_time": self.digest_finish_time,
-            "is_uncomfortable": self.is_uncomfortable
+            "is_uncomfortable": self.is_uncomfortable,
+            "is_bored": self.is_bored
         }
         try:
             with open(self.data_file, "w", encoding="utf-8") as f:
@@ -104,12 +114,22 @@ class PetStatus(QObject):
                 self.save_data()
                 print("DEBUG: Digestion finished -> Pet is now Uncomfortable")
 
+    def update_bored_status(self):
+        """Checks for boredom (50% chance every 30 mins)."""
+        if not self.is_bored:
+             if random.random() < 0.5:
+                 self.is_bored = True
+                 self.save_data()
+                 print("DEBUG: Pet is now Bored")
+
     def get_mood(self):
         # Update logic whenever mood is queried
         self.update_mood_status()
         
         if self.is_uncomfortable:
             return "불편"
+        elif self.is_bored:
+            return "심심함"
         elif self.hunger <= 30: # Only if really starving
             return "나쁨"
         else:
@@ -141,6 +161,12 @@ class PetStatus(QObject):
         self.save_data()
         print("DEBUG: Poop success -> Pet is Happy")
 
+    def play_success(self):
+        """Relieves boredom."""
+        self.is_bored = False
+        self.save_data()
+        print("DEBUG: Play success -> Pet is no longer Bored")
+
     def debug_set_full_hunger(self):
         self.hunger = 100
         self.save_data()
@@ -155,16 +181,24 @@ class PetStatus(QObject):
         self.last_fed_time = 0
         self.save_data()
         print("DEBUG: Reset Feed Cooldown")
-        print("DEBUG: Poop success -> Pet is Happy")
 
     # --- Debug Helpers ---
-    def debug_set_full_hunger(self):
-        self.hunger = 100
-        self.save_data()
-        print("DEBUG: Handled Full Hunger")
-        
     def debug_set_uncomfortable(self):
         self.is_uncomfortable = True
         self.digest_finish_time = 0 # Clear timer if any
         self.save_data()
         print("DEBUG: Handled Force Uncomfortable")
+
+    def debug_set_bored(self):
+        self.is_bored = True
+        self.save_data()
+        print("DEBUG: Handled Force Bored")
+
+    def debug_set_happy(self):
+        """Force happy state: Not bored, not uncomfortable. Hunger to 50 if low."""
+        self.is_bored = False
+        self.is_uncomfortable = False
+        if self.hunger <= 30:
+            self.hunger = 50
+        self.save_data()
+        print("DEBUG: Handled Force Happy")
