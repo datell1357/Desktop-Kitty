@@ -3,16 +3,16 @@ import os
 import time
 import random
 from PyQt6.QtCore import QTimer, QObject
+from . import resource_utils
 
 class PetStatus(QObject):
     def __init__(self, data_file=None):
         super().__init__()
         
-        # Use absolute path relative to project root to avoid CWD issues
+        # Use persistent data path
         if data_file is None:
-            # src/../pet_data.json
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            self.data_file = os.path.join(base_dir, "pet_data.json")
+            data_dir = resource_utils.get_data_path()
+            self.data_file = os.path.join(data_dir, "pet_data.json")
         else:
             self.data_file = data_file
             

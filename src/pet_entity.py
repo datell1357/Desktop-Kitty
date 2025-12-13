@@ -629,6 +629,7 @@ class PetEntity(QMainWindow):
 
     def close_app(self):
         self.close()
+        QApplication.instance().quit() # Force exit loop
 
     def closeEvent(self, event):
         self.save_position()
@@ -692,7 +693,7 @@ class PetEntity(QMainWindow):
         
         # Set Laser Cursor (System)
         try:
-            cursor_path = os.path.abspath(os.path.join("assets", "sprites", "Laser", "0.cur"))
+            cursor_path = os.path.join(ASSETS_DIR, "sprites", "Laser", "0.cur")
             if os.path.exists(cursor_path):
                 cursor_utils.set_system_cursor(cursor_path)
             else:

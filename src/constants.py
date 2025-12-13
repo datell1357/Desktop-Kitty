@@ -1,14 +1,18 @@
 import os
+from . import resource_utils
 
 # App Info
 APP_NAME = "Desktop Kitty"
 APP_VERSION = "1.0.0"
 
 # Filesystem
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Use resource_utils to determine paths based on Frozen state
+BASE_DIR = resource_utils.get_base_path()
+DATA_DIR = resource_utils.get_data_path()
+
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 SPRITES_DIR = os.path.join(ASSETS_DIR, "sprites")
-CONFIG_FILE = os.path.join(BASE_DIR, "settings.json")
+CONFIG_FILE = os.path.join(DATA_DIR, "settings.json")
 
 # Physics & World
 GRAVITY = 0.5

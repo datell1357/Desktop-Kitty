@@ -23,7 +23,6 @@ class SpriteManager:
     def load_sprites(self):
         """Loads images from disk or creates placeholders."""
         from PIL import Image, ImageOps, ImageDraw
-        import numpy as np
         
         print(f"DEBUG: Looking for sprites in {SPRITES_DIR}")
         for state in self.sprites.keys():
