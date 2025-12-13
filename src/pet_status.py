@@ -122,7 +122,7 @@ class PetStatus(QObject):
         # 3*60 = 180, 10*60 = 600
         delay = random.randint(180, 600)
         self.digest_finish_time = time.time() + delay
-        self.is_uncomfortable = False # Reset discomfort if feeding? Maybe makes sense.
+        # self.is_uncomfortable = False # Removed: Feed does not cure discomfort
         self.save_data()
         print(f"DEBUG: Fed pet. Digestion in {delay} seconds.")
         

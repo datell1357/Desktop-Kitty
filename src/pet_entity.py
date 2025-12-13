@@ -452,7 +452,7 @@ class PetEntity(QMainWindow):
             return
             
         self.fsm.set_state("feed", force=True)
-        QTimer.singleShot(5000, self.finish_feed)
+        QTimer.singleShot(5200, self.finish_feed)
         
     def finish_feed(self):
         if self.status:

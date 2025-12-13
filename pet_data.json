@@ -1,7 +1,7 @@
 {
     "birth_time": 1765542526.7436004,
-    "hunger": 100,
-    "last_fed_time": 1765583422.5692306,
-    "digest_finish_time": 0,
+    "hunger": 97,
+    "last_fed_time": 1765591150.6110582,
+    "digest_finish_time": 1765591565.6110582,
     "is_uncomfortable": false
 }

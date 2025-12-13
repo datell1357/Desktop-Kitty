@@ -1,9 +1,9 @@
 {
     "floating_mode": false,
     "sound_enabled": true,
-    "last_x": 1028,
-    "last_y": 567,
+    "last_x": 1379,
+    "last_y": 534,
     "always_on_top": true,
     "follow_mode": false,
-    "wait_mode": true
+    "wait_mode": false
 }
